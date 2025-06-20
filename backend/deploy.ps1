@@ -34,6 +34,16 @@ try {
     exit 1
 }
 
+# Check if Nova Sonic API key is provided
+if (-not $env:NOVA_SONIC_API_KEY) {
+    Write-Host "❌ Error: NOVA_SONIC_API_KEY environment variable is required" -ForegroundColor Red
+    Write-Host "Please set your Nova Sonic API key:" -ForegroundColor Yellow
+    Write-Host "`$env:NOVA_SONIC_API_KEY = 'your-api-key-here'" -ForegroundColor Cyan
+    exit 1
+}
+
+Write-Host "🔑 Nova Sonic API key found" -ForegroundColor Green
+
 # Create deployment package for Lambda
 Write-Host "📦 Creating Lambda deployment package..." -ForegroundColor Yellow
 
@@ -59,14 +69,15 @@ Remove-Item $TEMP_DIR -Recurse -Force
 Write-Host "✅ Lambda deployment package created" -ForegroundColor Green
 
 # Deploy CloudFormation stack
-Write-Host "🏗️  Deploying CloudFormation stack..." -ForegroundColor Yellow
-
+Write-Host "🚀 Deploying CloudFormation stack..." -ForegroundColor Green
 aws cloudformation deploy `
     --template-file template.yaml `
-    --stack-name $STACK_NAME `
-    --parameter-overrides ProjectName=$PROJECT_NAME `
+    --stack-name presentation-practice-stack `
+    --parameter-overrides `
+        ProjectName=presentation-practice `
+        NovaSonicApiKey=$env:NOVA_SONIC_API_KEY `
     --capabilities CAPABILITY_NAMED_IAM `
-    --region $REGION
+    --region us-east-1
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ CloudFormation deployment failed" -ForegroundColor Red

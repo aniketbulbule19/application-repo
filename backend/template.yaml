@@ -7,6 +7,11 @@ Parameters:
     Default: 'presentation-practice'
     Description: 'Name of the project for resource naming'
 
+  NovaSonicApiKey:
+    Type: String
+    Description: 'Nova Sonic API Key for AI analysis and speech-to-speech'
+    NoEcho: true
+
 Resources:
   # S3 Bucket for audio storage
   AudioBucket:
@@ -69,6 +74,14 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - execute-api:Invoke
+                Resource: 
+                  - 'arn:aws:execute-api:*:*:*'
+                Condition:
+                  StringEquals:
+                    'aws:RequestTag/Service': 'nova-sonic'
 
   # Lambda Function
   AudioProcessingFunction:
@@ -95,6 +108,8 @@ Resources:
       Environment:
         Variables:
           S3_BUCKET: !Ref AudioBucket
+          NOVA_SONIC_API_KEY: !Ref NovaSonicApiKey
+          NOVA_SONIC_ENDPOINT: 'https://api.nova-sonic.amazonaws.com'
       Timeout: 300
       MemorySize: 512
 

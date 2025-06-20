@@ -26,6 +26,16 @@ fi
 
 echo "✅ AWS CLI and credentials verified"
 
+# Check if Nova Sonic API key is provided
+if [ -z "$NOVA_SONIC_API_KEY" ]; then
+    echo "❌ Error: NOVA_SONIC_API_KEY environment variable is required"
+    echo "Please set your Nova Sonic API key:"
+    echo "export NOVA_SONIC_API_KEY='your-api-key-here'"
+    exit 1
+fi
+
+echo "🔑 Nova Sonic API key found"
+
 # Create deployment package for Lambda
 echo "📦 Creating Lambda deployment package..."
 
@@ -51,14 +61,15 @@ rm -rf "$TEMP_DIR"
 echo "✅ Lambda deployment package created"
 
 # Deploy CloudFormation stack
-echo "🏗️  Deploying CloudFormation stack..."
-
+echo "🚀 Deploying CloudFormation stack..."
 aws cloudformation deploy \
     --template-file template.yaml \
-    --stack-name "$STACK_NAME" \
-    --parameter-overrides ProjectName="$PROJECT_NAME" \
+    --stack-name presentation-practice-stack \
+    --parameter-overrides \
+        ProjectName=presentation-practice \
+        NovaSonicApiKey=$NOVA_SONIC_API_KEY \
     --capabilities CAPABILITY_NAMED_IAM \
-    --region "$REGION"
+    --region us-east-1
 
 echo "✅ CloudFormation stack deployed"
 

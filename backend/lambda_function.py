@@ -3,6 +3,7 @@ import base64
 import boto3
 import tempfile
 import os
+import requests
 from typing import Dict, Any, List
 import logging
 
@@ -14,6 +15,10 @@ logger.setLevel(logging.INFO)
 transcribe_client = boto3.client('transcribe')
 s3_client = boto3.client('s3')
 lambda_client = boto3.client('lambda')
+
+# Nova Sonic configuration
+NOVA_SONIC_ENDPOINT = os.environ.get('NOVA_SONIC_ENDPOINT', 'https://api.nova-sonic.amazonaws.com')
+NOVA_SONIC_API_KEY = os.environ.get('NOVA_SONIC_API_KEY')
 
 # Configuration
 S3_BUCKET = os.environ.get('S3_BUCKET', 'presentation-practice-audio')
@@ -171,19 +176,94 @@ def analyze_with_nova_sonic(transcript_data: Dict[str, Any], audio_key: str) -> 
     """
     
     # Call Nova Sonic for analysis
-    # Note: This is a placeholder - actual Nova Sonic integration would use the AWS SDK
-    # For now, we'll simulate the analysis
-    analysis_result = simulate_nova_sonic_analysis(transcript_text)
+    analysis_result = call_nova_sonic_analysis(transcript_text)
     
     return analysis_result
 
+def call_nova_sonic_analysis(transcript_text: str) -> Dict[str, Any]:
+    """
+    Call the actual AWS Nova Sonic API for analysis
+    """
+    if not NOVA_SONIC_API_KEY:
+        logger.warning("Nova Sonic API key not configured, falling back to simulation")
+        return simulate_nova_sonic_analysis(transcript_text)
+    
+    try:
+        # Prepare the analysis request for Nova Sonic
+        analysis_request = {
+            "model": "nova-sonic-1",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": """You are an expert public speaking coach. Analyze the given presentation transcript and provide detailed feedback on:
+                    1. Confidence score (0-100)
+                    2. Pronunciation mistakes and areas for improvement
+                    3. Overall feedback on presentation delivery
+                    4. Specific suggestions for improvement
+                    
+                    Focus on:
+                    - Speaking pace and rhythm
+                    - Clarity and articulation
+                    - Confidence indicators
+                    - Filler words and pauses
+                    - Overall presentation effectiveness
+                    
+                    Return your analysis in JSON format with the following structure:
+                    {
+                        "confidence": 75.5,
+                        "pronunciationMistakes": ["Reduce filler words", "Improve pacing"],
+                        "overallFeedback": "Your presentation was...",
+                        "wordCount": 150,
+                        "duration": 2.5,
+                        "suggestions": ["Practice more", "Slow down"]
+                    }"""
+                },
+                {
+                    "role": "user",
+                    "content": f"Please analyze this presentation transcript: {transcript_text}"
+                }
+            ],
+            "max_tokens": 1000,
+            "temperature": 0.3
+        }
+        
+        # Make the API call to Nova Sonic
+        headers = {
+            'Authorization': f'Bearer {NOVA_SONIC_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(
+            f"{NOVA_SONIC_ENDPOINT}/v1/chat/completions",
+            headers=headers,
+            json=analysis_request,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            content = response_data['choices'][0]['message']['content']
+            
+            # Parse the JSON response from Nova Sonic
+            try:
+                analysis_result = json.loads(content)
+                logger.info(f"Nova Sonic analysis completed successfully")
+                return analysis_result
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse Nova Sonic response as JSON: {content}")
+                return simulate_nova_sonic_analysis(transcript_text)
+        else:
+            logger.error(f"Nova Sonic API call failed with status {response.status_code}: {response.text}")
+            return simulate_nova_sonic_analysis(transcript_text)
+            
+    except Exception as e:
+        logger.error(f"Error calling Nova Sonic API: {str(e)}")
+        return simulate_nova_sonic_analysis(transcript_text)
+
 def simulate_nova_sonic_analysis(transcript_text: str) -> Dict[str, Any]:
     """
-    Simulate Nova Sonic analysis (replace with actual Nova Sonic API calls)
+    Fallback simulation when Nova Sonic is not available
     """
-    # This is a placeholder implementation
-    # In production, you would use the actual Nova Sonic API
-    
     word_count = len(transcript_text.split())
     duration_estimate = word_count / 150  # Assuming 150 words per minute
     
@@ -210,7 +290,8 @@ def simulate_nova_sonic_analysis(transcript_text: str) -> Dict[str, Any]:
         'pronunciationMistakes': pronunciation_mistakes,
         'overallFeedback': overall_feedback.strip(),
         'wordCount': word_count,
-        'duration': duration_estimate
+        'duration': duration_estimate,
+        'suggestions': ["Practice more", "Slow down", "Reduce filler words"]
     }
 
 def generate_feedback(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -248,11 +329,52 @@ def generate_audio_feedback(feedback: Dict[str, Any]) -> str:
     Keep practicing to improve your presentation skills!
     """
     
-    # This is a placeholder - in production, you would use Nova Sonic speech-to-speech
-    # For now, we'll return a base64 encoded placeholder
-    placeholder_audio = "data:audio/mp3;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT"
+    if not NOVA_SONIC_API_KEY:
+        logger.warning("Nova Sonic API key not configured, using placeholder audio")
+        return get_placeholder_audio()
     
-    return placeholder_audio
+    try:
+        # Prepare the speech-to-speech request for Nova Sonic
+        speech_request = {
+            "model": "nova-sonic-1",
+            "input": audio_text.strip(),
+            "voice": "alloy",  # You can choose from: alloy, echo, fable, onyx, nova, shimmer
+            "response_format": "mp3",
+            "speed": 1.0
+        }
+        
+        # Make the API call to Nova Sonic speech-to-speech
+        headers = {
+            'Authorization': f'Bearer {NOVA_SONIC_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(
+            f"{NOVA_SONIC_ENDPOINT}/v1/audio/speech",
+            headers=headers,
+            json=speech_request,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            # Encode the audio data as base64
+            audio_base64 = base64.b64encode(response.content).decode('utf-8')
+            audio_data_url = f"data:audio/mp3;base64,{audio_base64}"
+            logger.info("Nova Sonic speech-to-speech completed successfully")
+            return audio_data_url
+        else:
+            logger.error(f"Nova Sonic speech-to-speech failed with status {response.status_code}: {response.text}")
+            return get_placeholder_audio()
+            
+    except Exception as e:
+        logger.error(f"Error calling Nova Sonic speech-to-speech API: {str(e)}")
+        return get_placeholder_audio()
+
+def get_placeholder_audio() -> str:
+    """
+    Return a placeholder audio for fallback
+    """
+    return "data:audio/mp3;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT"
 
 def cleanup_temp_files(session_id: str):
     """

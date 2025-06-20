@@ -1,0 +1,57 @@
+{
+  "name": "presentation-practice-app",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.485.0",
+    "@aws-sdk/client-s3": "^3.485.0",
+    "@aws-sdk/client-transcribe": "^3.485.0",
+    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "@types/jest": "^27.5.2",
+    "@types/node": "^16.18.68",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "aws-sdk": "^2.1531.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "typescript": "^4.9.5",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "deploy:backend": "cd backend && ./deploy.sh",
+    "deploy:frontend": "npm run build && aws s3 sync build/ s3://presentation-practice-frontend --delete",
+    "deploy": "npm run deploy:backend && npm run deploy:frontend",
+    "mock-server": "node mock-server.js",
+    "dev": "concurrently \"npm run mock-server\" \"npm start\""
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

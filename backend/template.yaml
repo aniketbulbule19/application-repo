@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Presentation Practice Application Infrastructure'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'presentation-practice'
+    Description: 'Name of the project for resource naming'
+
+Resources:
+  # S3 Bucket for audio storage
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-audio-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldFiles
+            Status: Enabled
+            ExpirationInDays: 1
+            Prefix: recordings/
+
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AudioProcessingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${AudioBucket}'
+                  - !Sub 'arn:aws:s3:::${AudioBucket}/*'
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - transcribe:ListTranscriptionJobs
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Lambda Function
+  AudioProcessingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-audio-processor'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Headers': 'Content-Type',
+                      'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                  },
+                  'body': json.dumps('Hello from Lambda!')
+              }
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref AudioBucket
+      Timeout: 300
+      MemorySize: 512
+
+  # API Gateway
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      Description: 'API Gateway for Presentation Practice Application'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # API Gateway Resource
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: 'process-recording'
+
+  # API Gateway Method
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AudioProcessingFunction.Arn}/invocations'
+      RequestParameters:
+        method.request.header.Content-Type: true
+
+  # Lambda Permission for API Gateway
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AudioProcessingFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # API Gateway Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: prod
+
+  # CloudWatch Log Group
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AudioProcessingFunction}'
+      RetentionInDays: 7
+
+  # CloudFront Distribution for frontend
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - Id: S3Origin
+            DomainName: !Sub '${AudioBucket}.s3.${AWS::Region}.amazonaws.com'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOAI}'
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # CloudFront Origin Access Identity
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'OAI for ${ProjectName}'
+
+  # S3 Bucket Policy for CloudFront
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AudioBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}'
+            Action: s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${AudioBucket}/*'
+
+Outputs:
+  ApiGatewayUrl:
+    Description: 'API Gateway URL'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/process-recording'
+    Export:
+      Name: !Sub '${ProjectName}-api-url'
+
+  S3BucketName:
+    Description: 'S3 Bucket for audio storage'
+    Value: !Ref AudioBucket
+    Export:
+      Name: !Sub '${ProjectName}-s3-bucket'
+
+  CloudFrontUrl:
+    Description: 'CloudFront Distribution URL'
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+    Export:
+      Name: !Sub '${ProjectName}-cloudfront-url'
+
+  LambdaFunctionArn:
+    Description: 'Lambda Function ARN'
+    Value: !GetAtt AudioProcessingFunction.Arn
+    Export:
+      Name: !Sub '${ProjectName}-lambda-arn' 
